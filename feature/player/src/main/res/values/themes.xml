@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      The player is a fullscreen, always-dark surface; the whole UI is drawn in Compose,
+      so a bare no-action-bar platform theme with a black window background is all we need.
+    -->
+    <style name="Theme.Loop.Player" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>
