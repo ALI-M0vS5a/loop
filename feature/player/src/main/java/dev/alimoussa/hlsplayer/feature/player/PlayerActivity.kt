@@ -35,6 +35,8 @@ class PlayerActivity : ComponentActivity() {
 
     private var subscribed = false
 
+    private var isFreshStart = true
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(
@@ -66,11 +68,16 @@ class PlayerActivity : ComponentActivity() {
         future.addListener({
             val controller = future.get()
             playerState.value = controller
-            // First connection for this session: load the (subscription-aware) media and play.
-            if (controller.currentMediaItem == null) {
+            if (isFreshStart) {
+                // Fresh launch: (re)load the subscription-aware media and play, replacing whatever
+                // stale item the reused service player may still be holding.
+                isFreshStart = false
                 controller.setMediaItem(PlayerService.requestItem(subscribed))
                 controller.prepare()
-                controller.playWhenReady = true
+                controller.play()
+            } else {
+                // Returning from the background: just resume the existing item.
+                controller.play()
             }
         }, ContextCompat.getMainExecutor(this))
     }
@@ -82,13 +89,13 @@ class PlayerActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        // Stop and release the session, then ask the service to stop (no background playback).
+        // Stop playback and release this Activity's controller (no background playback). The
+        // service cleans itself up when the app's task is removed.
         (controllerFuture?.takeIf { it.isDone }?.get())?.stop()
         controllerFuture?.let { MediaController.releaseFuture(it) }
         controllerFuture = null
         playerState.value = null
         PlayerAdOverlay.setView(null)
-        stopService(Intent(this, PlayerService::class.java))
         super.onDestroy()
     }
 
