@@ -85,9 +85,11 @@ fun PlayerScreen(
         player.seekTo(target)
         controls.showControls()
     }
-    val seekTo: (Float) -> Unit = { fraction ->
-        if (playback.durationMs > 0L) player.seekTo((fraction * playback.durationMs).toLong())
+    val seekTo: (Long) -> Unit = { positionMs ->
+        player.seekTo(positionMs.coerceIn(0L, playback.durationMs.coerceAtLeast(0L)))
+        controls.showControls()
     }
+
     val toggleFullscreen: () -> Unit = {
         activity?.let {
             it.requestedOrientation = if (fullscreen) {
@@ -146,7 +148,7 @@ fun PlayerScreen(
                     onTogglePlay = togglePlay,
                     onRewind = { seekBy(-10_000L) },
                     onForward = { seekBy(10_000L) },
-                    onSeekTo = seekTo,
+                    onSeek = seekTo,
                     onToggleFullscreen = toggleFullscreen,
                 )
             }

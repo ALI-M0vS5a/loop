@@ -44,6 +44,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -63,7 +64,16 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.alimoussa.hlsplayer.feature.player.util.formatTime
+import kotlin.math.abs
 
+private const val SEEK_SETTLED_MS = 700L
+
+/**
+ * Custom Material 3 Expressive content controls, recreating `HLS Player.html`:
+ * top bar (back / title / HD pill), a centered transport (rewind 10s, play-pause with a
+ * pulsing ring, forward 10s), and a bottom row (current time, scrubber with IMA ad-break
+ * markers, duration, fullscreen). These show only during content playback.
+ */
 @Composable
 internal fun PlayerControls(
     subscribed: Boolean,
@@ -121,7 +131,7 @@ internal fun PlayerControls(
                 onBack = onBack,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(start = 12.dp, end = 12.dp, top = 16.dp),
+                    .padding(start = 12.dp, end = 12.dp, top = 12.dp),
             )
 
             CenterTransport(
@@ -160,7 +170,7 @@ private fun TopBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        IconButton(
+        IconButtonM3(
             icon = Icons.AutoMirrored.Filled.ArrowBack,
             contentDescription = "Back",
             size = 42.dp,
@@ -211,14 +221,14 @@ private fun CenterTransport(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(26.dp),
     ) {
-        IconButton(
+        IconButtonM3(
             icon = Icons.Filled.Replay10,
             contentDescription = "Rewind 10 seconds",
             size = 50.dp,
             onClick = onRewind,
         )
         PlayPauseButton(isPlaying = isPlaying, isEnded = isEnded, onClick = onTogglePlay)
-        IconButton(
+        IconButtonM3(
             icon = Icons.Filled.Forward10,
             contentDescription = "Forward 10 seconds",
             size = 50.dp,
@@ -291,36 +301,6 @@ private fun PlayPauseButton(
 }
 
 @Composable
-private fun IconButton(
-    icon: ImageVector,
-    contentDescription: String,
-    size: Dp,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    background: Color = PlayerTokens.IconButtonBg,
-) {
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) 0.88f else 1f, label = "iconPress")
-    Box(
-        modifier = modifier
-            .size(size)
-            .graphicsLayer { scaleX = scale; scaleY = scale }
-            .clip(CircleShape)
-            .background(background)
-            .clickable(interaction, indication = null, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = Color.White,
-            modifier = Modifier.size(size * 0.5f),
-        )
-    }
-}
-
-@Composable
 private fun BottomBar(
     subscribed: Boolean,
     positionMs: Long,
@@ -332,13 +312,16 @@ private fun BottomBar(
     modifier: Modifier = Modifier,
 ) {
     val duration = durationMs.coerceAtLeast(0L)
-
-    // Scrub-then-commit (NextPlayer's approach): dragging only updates a local pending position
-    // and never touches the player; the real seek happens once, on release. The time label tracks
-    // the pending position so the number matches the thumb while you drag.
-    var scrubbing by remember { mutableStateOf(false) }
+    var dragging by remember { mutableStateOf(false) }
     var scrubValue by remember { mutableFloatStateOf(0f) }
-    val displayedMs = if (scrubbing) scrubValue.toLong() else positionMs
+    var pendingSeekMs by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(positionMs, pendingSeekMs) {
+        val target = pendingSeekMs
+        if (target != null && abs(positionMs - target) <= SEEK_SETTLED_MS) pendingSeekMs = null
+    }
+
+    val showScrub = dragging || pendingSeekMs != null
+    val displayedMs = if (showScrub) scrubValue.toLong() else positionMs
 
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -352,12 +335,17 @@ private fun BottomBar(
             modifier = Modifier.widthIn(min = 38.dp),
         )
         Scrubber(
-            value = if (scrubbing) scrubValue else positionMs.toFloat()
+            value = if (showScrub) scrubValue else positionMs.toFloat()
                 .coerceIn(0f, duration.toFloat()),
             duration = duration,
             adMarkers = if (subscribed) emptyList() else adMarkers,
-            onValueChange = { scrubbing = true; scrubValue = it },
-            onValueChangeFinished = { onSeek(scrubValue.toLong()); scrubbing = false },
+            onValueChange = { dragging = true; scrubValue = it },
+            onValueChangeFinished = {
+                val target = scrubValue.toLong()
+                onSeek(target)
+                pendingSeekMs = target
+                dragging = false
+            },
             modifier = Modifier.weight(1f),
         )
         Text(
@@ -366,7 +354,7 @@ private fun BottomBar(
             fontSize = 12.sp,
             modifier = Modifier.widthIn(min = 38.dp),
         )
-        IconButton(
+        IconButtonM3(
             icon = if (fullscreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
             contentDescription = "Fullscreen",
             size = 38.dp,
@@ -426,6 +414,7 @@ private fun Scrubber(
     )
 }
 
+/** The slider track: inactive bar, the violet played portion, and the yellow IMA ad-break dots. */
 @Composable
 private fun SeekTrack(
     progress: Float,
@@ -470,6 +459,41 @@ private fun SeekTrack(
         }
     }
 }
+
+/** Round, translucent Material 3 Expressive icon button with a springy press-scale. */
+@Composable
+private fun IconButtonM3(
+    icon: ImageVector,
+    contentDescription: String,
+    size: Dp,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    background: Color = PlayerTokens.IconButtonBg,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.88f else 1f, label = "iconPress")
+    Box(
+        modifier = modifier
+            .size(size)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(CircleShape)
+            .background(background)
+            .clickable(interaction, indication = null, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = Color.White,
+            modifier = Modifier.size(size * 0.5f),
+        )
+    }
+}
+
+// ── Design-time previews ─────────────────────────────────────────────
+// The controls sit over the video, so each preview is drawn on a black
+// backdrop at a phone aspect ratio. Times/markers mirror the design mockups.
 
 /** Ad-supported (not subscribed), playing — note the yellow IMA ad-break markers. */
 @Preview(name = "Controls · Ad-supported (playing)", widthDp = 360, heightDp = 780)
