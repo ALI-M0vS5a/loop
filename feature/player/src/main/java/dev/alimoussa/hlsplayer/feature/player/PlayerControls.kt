@@ -9,8 +9,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -40,12 +38,17 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Replay10
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -53,7 +56,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -75,7 +77,7 @@ internal fun PlayerControls(
     onTogglePlay: () -> Unit,
     onRewind: () -> Unit,
     onForward: () -> Unit,
-    onSeekTo: (Float) -> Unit,
+    onSeek: (Long) -> Unit,
     onToggleFullscreen: () -> Unit,
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
@@ -137,11 +139,11 @@ internal fun PlayerControls(
                 durationMs = durationMs,
                 adMarkers = adMarkers,
                 fullscreen = fullscreen,
-                onSeekTo = onSeekTo,
+                onSeek = onSeek,
                 onToggleFullscreen = onToggleFullscreen,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(start = 18.dp, end = 18.dp, bottom = 16.dp),
+                    .padding(start = 18.dp, end = 18.dp, bottom = 12.dp),
             )
         }
     }
@@ -325,28 +327,37 @@ private fun BottomBar(
     durationMs: Long,
     adMarkers: List<Float>,
     fullscreen: Boolean,
-    onSeekTo: (Float) -> Unit,
+    onSeek: (Long) -> Unit,
     onToggleFullscreen: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val duration = durationMs.coerceAtLeast(0L)
+
+    // Scrub-then-commit (NextPlayer's approach): dragging only updates a local pending position
+    // and never touches the player; the real seek happens once, on release. The time label tracks
+    // the pending position so the number matches the thumb while you drag.
+    var scrubbing by remember { mutableStateOf(false) }
+    var scrubValue by remember { mutableFloatStateOf(0f) }
+    val displayedMs = if (scrubbing) scrubValue.toLong() else positionMs
+
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
-            text = formatTime(positionMs),
+            text = formatTime(displayedMs),
             color = Color.White,
             fontSize = 12.sp,
             modifier = Modifier.widthIn(min = 38.dp),
         )
         Scrubber(
-            progress = if (durationMs > 0L) (positionMs.toFloat() / durationMs).coerceIn(
-                0f,
-                1f
-            ) else 0f,
+            value = if (scrubbing) scrubValue else positionMs.toFloat()
+                .coerceIn(0f, duration.toFloat()),
+            duration = duration,
             adMarkers = if (subscribed) emptyList() else adMarkers,
-            onSeekTo = onSeekTo,
+            onValueChange = { scrubbing = true; scrubValue = it },
+            onValueChangeFinished = { onSeek(scrubValue.toLong()); scrubbing = false },
             modifier = Modifier.weight(1f),
         )
         Text(
@@ -365,36 +376,72 @@ private fun BottomBar(
     }
 }
 
+/**
+ * Seek bar built on the Material 3 [Slider] (like NextPlayer) so all the tap / drag / scrub
+ * gesture handling is correct and robust. We supply a custom violet thumb (with a halo) and a
+ * custom track that also paints the yellow IMA ad-break markers.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun Scrubber(
+    value: Float,
+    duration: Long,
+    adMarkers: List<Float>,
+    onValueChange: (Float) -> Unit,
+    onValueChangeFinished: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val primary = MaterialTheme.colorScheme.primary
+    Slider(
+        value = value,
+        onValueChange = onValueChange,
+        onValueChangeFinished = onValueChangeFinished,
+        valueRange = 0f..(duration.toFloat().takeIf { it > 0f } ?: 1f),
+        enabled = duration > 0L,
+        modifier = modifier,
+        thumb = {
+            Box(contentAlignment = Alignment.Center) {
+                Box(
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clip(CircleShape)
+                        .background(primary.copy(alpha = 0.25f)),
+                )
+                Box(
+                    modifier = Modifier
+                        .size(15.dp)
+                        .clip(CircleShape)
+                        .background(primary),
+                )
+            }
+        },
+        track = { state ->
+            val progress = if (duration > 0L) {
+                (state.value / duration.toFloat()).coerceIn(0f, 1f)
+            } else {
+                0f
+            }
+            SeekTrack(progress = progress, adMarkers = adMarkers, activeColor = primary)
+        },
+    )
+}
+
+@Composable
+private fun SeekTrack(
     progress: Float,
     adMarkers: List<Float>,
-    onSeekTo: (Float) -> Unit,
+    activeColor: Color,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(
         modifier = modifier
-            .height(22.dp)
-            .pointerInput(Unit) {
-                val widthPx = size.width.toFloat()
-                detectTapGestures { offset ->
-                    if (widthPx > 0f) onSeekTo((offset.x / widthPx).coerceIn(0f, 1f))
-                }
-            }
-            .pointerInput(Unit) {
-                val widthPx = size.width.toFloat()
-                detectHorizontalDragGestures { change, _ ->
-                    if (widthPx > 0f) onSeekTo((change.position.x / widthPx).coerceIn(0f, 1f))
-                }
-            },
+            .fillMaxWidth()
+            .height(22.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
         val barWidth = maxWidth
-        val thumbSize = 15.dp
         val markerSize = 9.dp
-        val primary = MaterialTheme.colorScheme.primary
-
-        // Track
+        // Inactive track
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -408,7 +455,7 @@ private fun Scrubber(
                 .fillMaxWidth(progress)
                 .height(6.dp)
                 .clip(CircleShape)
-                .background(primary),
+                .background(activeColor),
         )
         // IMA ad-break markers
         adMarkers.forEach { fraction ->
@@ -421,25 +468,10 @@ private fun Scrubber(
                     .border(1.5.dp, Color.Black.copy(alpha = 0.35f), CircleShape),
             )
         }
-        // Thumb halo
-        Box(
-            modifier = Modifier
-                .offset(x = barWidth * progress - 13.dp)
-                .size(26.dp)
-                .clip(CircleShape)
-                .background(primary.copy(alpha = 0.25f)),
-        )
-        // Thumb
-        Box(
-            modifier = Modifier
-                .offset(x = barWidth * progress - thumbSize / 2)
-                .size(thumbSize)
-                .clip(CircleShape)
-                .background(primary),
-        )
     }
 }
 
+/** Ad-supported (not subscribed), playing — note the yellow IMA ad-break markers. */
 @Preview(name = "Controls · Ad-supported (playing)", widthDp = 360, heightDp = 780)
 @Composable
 private fun PlayerControlsAdSupportedPreview() {
@@ -461,13 +493,14 @@ private fun PlayerControlsAdSupportedPreview() {
                 onTogglePlay = {},
                 onRewind = {},
                 onForward = {},
-                onSeekTo = {},
+                onSeek = {},
                 onToggleFullscreen = {},
             )
         }
     }
 }
 
+/** Ad-free (subscribed), paused — no markers, play icon showing. */
 @Preview(name = "Controls · Ad-free (paused)", widthDp = 360, heightDp = 780)
 @Composable
 private fun PlayerControlsAdFreePreview() {
@@ -489,7 +522,7 @@ private fun PlayerControlsAdFreePreview() {
                 onTogglePlay = {},
                 onRewind = {},
                 onForward = {},
-                onSeekTo = {},
+                onSeek = {},
                 onToggleFullscreen = {},
             )
         }
