@@ -18,13 +18,18 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -104,35 +109,41 @@ internal fun PlayerControls(
                 ),
         )
 
-        TopBar(
-            subscribed = subscribed,
-            onBack = onBack,
+        Box(
             modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(start = 12.dp, end = 12.dp, top = 16.dp),
-        )
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout)),
+        ) {
+            TopBar(
+                subscribed = subscribed,
+                onBack = onBack,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(start = 12.dp, end = 12.dp, top = 16.dp),
+            )
 
-        CenterTransport(
-            isPlaying = isPlaying,
-            isEnded = isEnded,
-            onTogglePlay = onTogglePlay,
-            onRewind = onRewind,
-            onForward = onForward,
-            modifier = Modifier.align(Alignment.Center),
-        )
+            CenterTransport(
+                isPlaying = isPlaying,
+                isEnded = isEnded,
+                onTogglePlay = onTogglePlay,
+                onRewind = onRewind,
+                onForward = onForward,
+                modifier = Modifier.align(Alignment.Center),
+            )
 
-        BottomBar(
-            subscribed = subscribed,
-            positionMs = positionMs,
-            durationMs = durationMs,
-            adMarkers = adMarkers,
-            fullscreen = fullscreen,
-            onSeekTo = onSeekTo,
-            onToggleFullscreen = onToggleFullscreen,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(start = 18.dp, end = 18.dp, bottom = 16.dp),
-        )
+            BottomBar(
+                subscribed = subscribed,
+                positionMs = positionMs,
+                durationMs = durationMs,
+                adMarkers = adMarkers,
+                fullscreen = fullscreen,
+                onSeekTo = onSeekTo,
+                onToggleFullscreen = onToggleFullscreen,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(start = 18.dp, end = 18.dp, bottom = 16.dp),
+            )
+        }
     }
 }
 
