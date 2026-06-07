@@ -24,4 +24,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Loop"
 include(":app")
- 
+include(":feature:player")
